@@ -1,6 +1,6 @@
 # Container Instance Hello World
 
-The goal of this tutorial is to launch a Container Instance using a public instance and be able to see webpage served by NGINX through your browser.
+The goal of this tutorial is to launch a Container Instance using a public container image and be able to see webpage served by NGINX through your browser.
 
 As you make your way through this tutorial, look out for this icon ![user input icon](../../images/userinput.png).
 Whenever you see it, it's time for you to perform an action.
