@@ -17,6 +17,7 @@ This repository provides examples demonstrating how to use Oracle Container Inst
 | Description                                          |         Tutorial Link          |  
 |------------------------------------------------------|:------------------------------:|
 | Hello World                                          | [sample](./samples/helloworld) |
+| Deploy using OCI DevOps                              | [sample](https://github.com/oracle-devrel/oci-devops-examples/tree/main/oci-deployment-examples/oci-devops-deploy-containerinstance)
 
 ## Documentation
 
