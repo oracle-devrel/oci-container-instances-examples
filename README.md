@@ -17,7 +17,8 @@ This repository provides examples demonstrating how to use Oracle Container Inst
 | Description                                          |         Tutorial Link          |  
 |------------------------------------------------------|:------------------------------:|
 | Hello World                                          | [sample](./samples/helloworld) |
-| Deploy using OCI DevOps                              | [sample](https://github.com/oracle-devrel/oci-devops-examples/tree/main/oci-deployment-examples/oci-devops-deploy-containerinstance)
+| Deploy using OCI DevOps                              | [sample](https://github.com/oracle-devrel/oci-devops-examples/tree/main/oci-deployment-examples/oci-devops-deploy-containerinstance)|
+| Deploy Java applications using **App Stack for Java** - a customizable Terraform Stack to automate deployment of Java apps connecting to an Autonomous Database on OCI Container Instances. Leverage optional integrations with OCI DevOps, Vault, APM, Load Balancer, HTTPS Certificates, and DNS.   | [Quickstart](https://github.com/oracle-quickstart/appstack)|
 
 ## Documentation
 
