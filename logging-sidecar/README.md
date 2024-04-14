@@ -71,7 +71,7 @@ Currently, creating vm with emptyDir via console is not supported. We have to cr
 ```commandline
 oci raw-request --http-method POST --target-uri https://compute-containers.{REGION}.oci.oraclecloud.com/20210415/containerInstances  --config-file <AuthConfigFilePath>  --profile <AuthProFileName> --auth security_token --request-body file:///PATHTOYOURJSONFILE
 ```
-   
+
 2. You need to modify and use the json file below and save the file to the path where you used in above cmd
 ```json
 {
