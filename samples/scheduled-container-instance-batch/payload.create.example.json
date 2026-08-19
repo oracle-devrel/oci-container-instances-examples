@@ -1,0 +1,24 @@
+{
+  "operation": "create",
+  "batch_id": "nightly-test",
+  "max_retries": 3,
+  "instances": [
+    {
+      "compartment_id": "ocid1.compartment.oc1..example",
+      "availability_domain": "kIdk:US-ASHBURN-AD-1",
+      "display_name": "nightly-test-{index}",
+      "target_count": 3,
+      "shape": "CI.Standard.E4.Flex",
+      "shape_config": { "ocpus": 1.0, "memory_in_gbs": 1.0 },
+      "vnics": [{ "subnet_id": "ocid1.subnet.oc1.iad.example", "is_public_ip_assigned": true }],
+      "containers": [
+        {
+          "display_name": "work",
+          "image_url": "busybox:latest",
+          "command": ["/bin/sh"],
+          "arguments": ["-c", "echo batch started; sleep 3600"]
+        }
+      ]
+    }
+  ]
+}
