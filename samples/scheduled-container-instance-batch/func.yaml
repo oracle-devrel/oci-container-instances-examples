@@ -1,0 +1,15 @@
+schema_version: 20180708
+name: scheduled-container-instance-batch
+version: 0.0.1
+runtime: python
+build_image: fnproject/python:3.11-dev
+run_image: fnproject/python:3.11
+entrypoint: /python/bin/fdk /function/func.py handler
+memory: 512
+timeout: 300
+config:
+  OCI_BATCH_CREATE_REQUESTS_PER_SECOND: "1"
+  OCI_BATCH_CREATE_REQUESTS_PER_MINUTE: "10"
+  OCI_BATCH_DELETE_REQUESTS_PER_SECOND: "1"
+  OCI_BATCH_DELETE_REQUESTS_PER_MINUTE: "10"
+  OCI_BATCH_STATE_PREFIX: scheduled-container-batches

@@ -19,6 +19,7 @@ This repository provides examples demonstrating how to use Oracle Container Inst
 | Hello World                                          | [sample](./samples/helloworld) |
 | Send application logs directly to OCI Logging from a Java app by using the OCI Java SDK, with support for resource principal auth in Container Instances and config file auth for local testing. | [sample](./samples/direct-oci-logging-java) |
 | Run sidecar-based observability on OCI Container Instances with a log generator, an OCI Logging forwarder, an OCI Monitoring metrics forwarder, and Terraform-based deployment assets. | [sample](./samples/oci-logging-monitoring-sidecars) |
+| Create and terminate batches of Container Instances at one-time or recurring Resource Scheduler times, with OCID tracking in Object Storage. | [sample](./samples/scheduled-container-instance-batch) |
 | Deploy using OCI DevOps                              | [sample](https://github.com/oracle-devrel/oci-devops-examples/tree/main/oci-deployment-examples/oci-devops-deploy-containerinstance)|
 | Deploy Java applications using **App Stack for Java** - a customizable Terraform Stack to automate deployment of Java apps connecting to an Autonomous Database on OCI Container Instances. Leverage optional integrations with OCI DevOps, Vault, APM, Load Balancer, HTTPS Certificates, and DNS.   | [Quickstart](https://github.com/oracle-quickstart/appstack)|
 
