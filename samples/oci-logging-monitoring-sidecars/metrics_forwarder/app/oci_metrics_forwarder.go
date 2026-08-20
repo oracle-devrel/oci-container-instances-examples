@@ -1,3 +1,8 @@
+// OCI metrics forwarder for the sidecar sample.
+//
+// The forwarder tails a shared JSON-lines metrics file, persists offsets by
+// inode so rotation can be drained safely, stages batches on disk, validates
+// each metric record, and ships the results to OCI Monitoring.
 package main
 
 import (
@@ -24,6 +29,7 @@ import (
 
 var logger = log.New(os.Stdout, "[metrics-forwarder] ", log.LstdFlags)
 
+// trackedFile stores the current read position for one inode-backed file.
 type trackedFile struct {
 	Path   string `json:"path"`
 	Inode  uint64 `json:"inode"`
@@ -59,6 +65,7 @@ type statePayload struct {
 	TrackedFiles []trackedFile `json:"tracked_files"`
 }
 
+// spoolQueue persists pending metric batches before OCI API calls succeed.
 type spoolQueue struct {
 	spoolDir string
 }
@@ -545,6 +552,8 @@ type ociMetricsForwarder struct {
 	nextDiskUsageLogAt   time.Time
 }
 
+// newOciMetricsForwarder resolves environment variables and reconstructs any
+// durable state that was left behind by earlier runs.
 func newOciMetricsForwarder() (*ociMetricsForwarder, error) {
 	client, err := buildMonitoringClient()
 	if err != nil {
@@ -586,6 +595,7 @@ func newOciMetricsForwarder() (*ociMetricsForwarder, error) {
 	}, nil
 }
 
+// start runs the main poll, validate, spool, and flush loop until shutdown.
 func (f *ociMetricsForwarder) start(ctx context.Context) int {
 	logger.Printf("starting OCI metrics forwarder")
 	logger.Printf("source file: %s", f.fileTracker.path)
@@ -636,6 +646,8 @@ func (f *ociMetricsForwarder) start(ctx context.Context) int {
 	return 0
 }
 
+// buildMetricBatch drops invalid records but keeps the valid subset of a file
+// batch so one malformed line does not block the pipeline.
 func (f *ociMetricsForwarder) buildMetricBatch(fileBatch fileReadBatch) *metricBatch {
 	records := make([]metricRecord, 0, len(fileBatch.Lines))
 	for _, line := range fileBatch.Lines {
@@ -657,6 +669,8 @@ func (f *ociMetricsForwarder) buildMetricBatch(fileBatch fileReadBatch) *metricB
 	}
 }
 
+// parseMetricLine normalizes one JSON line into the structure expected by the
+// OCI Monitoring SDK request payload.
 func (f *ociMetricsForwarder) parseMetricLine(line string) *metricRecord {
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(line), &payload); err != nil {
@@ -763,6 +777,8 @@ func (f *ociMetricsForwarder) logMetricFileUsageIfDue(force bool) {
 	f.nextDiskUsageLogAt = now.Add(f.diskUsageLogInterval)
 }
 
+// flushSpool retries queued batches with exponential backoff and keeps the
+// oldest batch first to preserve ordering as much as possible.
 func (f *ociMetricsForwarder) flushSpool(stopWhenEmpty bool) {
 	backoff := f.retryInitial
 	for {
@@ -807,6 +823,7 @@ func (f *ociMetricsForwarder) flushSpool(stopWhenEmpty bool) {
 	}
 }
 
+// putBatch converts one validated metric batch into an OCI Monitoring request.
 func (f *ociMetricsForwarder) putBatch(batch metricBatch) error {
 	metricData := make([]monitoring.MetricDataDetails, 0, len(batch.Records))
 	for _, record := range batch.Records {
@@ -844,6 +861,8 @@ func (f *ociMetricsForwarder) putBatch(batch metricBatch) error {
 	return nil
 }
 
+// buildMonitoringClient creates an OCI Monitoring client that only uses the
+// resource principal supplied by the runtime environment.
 func buildMonitoringClient() (monitoring.MonitoringClient, error) {
 	provider, err := auth.ResourcePrincipalConfigurationProvider()
 	if err != nil {

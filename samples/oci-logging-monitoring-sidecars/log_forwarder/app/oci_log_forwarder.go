@@ -1,3 +1,8 @@
+// OCI log forwarder for the sidecar sample.
+//
+// The forwarder tails a shared log file, persists offsets by inode so rotation
+// can be drained safely, stages batches on disk, and ships them to OCI Logging
+// by using the container instance resource principal.
 package main
 
 import (
@@ -27,6 +32,7 @@ import (
 
 var logger = log.New(os.Stdout, "[log-forwarder] ", log.LstdFlags)
 
+// trackedFile stores the current read position for one inode-backed file.
 type trackedFile struct {
 	Path   string `json:"path"`
 	Inode  uint64 `json:"inode"`
@@ -52,6 +58,7 @@ type spoolPayload struct {
 	CreatedAt  string   `json:"created_at"`
 }
 
+// spoolQueue persists pending batches before OCI API calls succeed.
 type spoolQueue struct {
 	spoolDir string
 }
@@ -569,6 +576,8 @@ type ociLogForwarder struct {
 	nextDiskUsageLogAt   time.Time
 }
 
+// newOciLogForwarder resolves environment variables and reconstructs any
+// durable state that was left behind by earlier runs.
 func newOciLogForwarder() (*ociLogForwarder, error) {
 	client, err := buildLoggingClient()
 	if err != nil {
@@ -610,6 +619,7 @@ func newOciLogForwarder() (*ociLogForwarder, error) {
 	}, nil
 }
 
+// start runs the main poll, spool, and flush loop until shutdown is requested.
 func (f *ociLogForwarder) start(ctx context.Context) int {
 	logger.Printf("starting OCI log forwarder")
 	logger.Printf("source file: %s", f.fileTracker.path)
@@ -714,6 +724,8 @@ func (f *ociLogForwarder) normalizeLine(line string) string {
 	return string(truncated) + marker
 }
 
+// flushSpool retries queued batches with exponential backoff and keeps the
+// oldest batch first to preserve ordering as much as possible.
 func (f *ociLogForwarder) flushSpool(stopWhenEmpty bool) {
 	backoff := f.retryInitial
 	for {
@@ -758,6 +770,7 @@ func (f *ociLogForwarder) flushSpool(stopWhenEmpty bool) {
 	}
 }
 
+// putBatch converts one read batch into the OCI Logging ingestion payload.
 func (f *ociLogForwarder) putBatch(batch readBatch) error {
 	timestamp := common.SDKTime{Time: time.Now().UTC()}
 	entries := make([]loggingingestion.LogEntry, 0, len(batch.Lines))
@@ -799,6 +812,8 @@ func (f *ociLogForwarder) putBatch(batch readBatch) error {
 	return nil
 }
 
+// buildLoggingClient creates an OCI Logging ingestion client that only uses the
+// resource principal supplied by the runtime environment.
 func buildLoggingClient() (loggingingestion.LoggingClient, error) {
 	provider, err := auth.ResourcePrincipalConfigurationProvider()
 	if err != nil {

@@ -1,3 +1,9 @@
+# Input contract for the Terraform deployment used by this sample.
+#
+# Variables are grouped by concern so it is clear which settings affect the
+# base container instance, the generator container, each optional sidecar, and
+# the shared OCI resources around them.
+
 # Common OCI deployment settings
 
 variable "tenancy_ocid" {

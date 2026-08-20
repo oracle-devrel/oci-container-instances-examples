@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Entrypoint for the OCI Monitoring sidecar image.
+# It validates the required OCI settings, prepares local state directories,
+# optionally starts an internal logrotate loop, and then launches the Go forwarder.
+
 log() {
   printf '[metrics-entrypoint] %s\n' "$*"
 }
@@ -22,6 +26,8 @@ require_env() {
 
 render_template() {
   local dst="$2"
+  # The metric file is rotated in-place with copytruncate so the generator can
+  # keep writing to the same path without reopening the file.
   cat > "${dst}" <<EOF
 ${METRIC_FILE_PATH} {
     ${LOGROTATE_FREQUENCY}
@@ -36,6 +42,7 @@ EOF
 }
 
 start_logrotate_loop() {
+  # Run logrotate on a polling loop because the container does not run cron.
   while true; do
     /usr/sbin/logrotate -v -s "${LOGROTATE_STATE_FILE}" /etc/logrotate.d/metric-file.conf
     sleep "${LOGROTATE_INTERVAL_SECONDS}"
@@ -43,6 +50,8 @@ start_logrotate_loop() {
 }
 
 main() {
+  # Export defaults here so the Go process sees the same resolved values that
+  # the entrypoint uses for directory creation and logrotate setup.
   require_env METRIC_FILE_PATH
   require_env OCI_MONITORING_NAMESPACE
   require_env OCI_MONITORING_COMPARTMENT_ID

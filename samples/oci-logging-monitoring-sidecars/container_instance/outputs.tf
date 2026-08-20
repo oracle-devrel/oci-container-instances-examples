@@ -1,3 +1,6 @@
+# Key Terraform outputs for integrating with the created runtime and optional
+# OCI Logging resources after `terraform apply`.
+
 output "container_instance_id" {
   description = "OCID of the created container instance."
   value       = oci_container_instances_container_instance.logging_test.id

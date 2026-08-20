@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Entrypoint for the OCI Logging sidecar image.
+# It validates the required OCI settings, prepares local state directories,
+# optionally starts an internal logrotate loop, and then launches the Go forwarder.
+
 log() {
   printf '[log-forwarder-entrypoint] %s\n' "$*"
 }
@@ -23,6 +27,8 @@ require_env() {
 render_template() {
   local dst="$2"
 
+  # Generate the logrotate config at runtime so container env vars fully drive
+  # the rotation policy without requiring custom image builds.
   cat > "${dst}" <<EOF
 ${LOG_FILE_PATH} {
     ${LOGROTATE_FREQUENCY}
@@ -39,6 +45,7 @@ EOF
 }
 
 start_logrotate_loop() {
+  # Run logrotate on a polling loop because the container does not run cron.
   while true; do
     /usr/sbin/logrotate -v -s "${LOGROTATE_STATE_FILE}" /etc/logrotate.d/log-file.conf
     sleep "${LOGROTATE_INTERVAL_SECONDS}"
@@ -46,6 +53,8 @@ start_logrotate_loop() {
 }
 
 main() {
+  # Export defaults here so the Go process sees the same resolved values that
+  # the entrypoint uses for directory creation and logrotate setup.
   require_env LOG_FILE_PATH
   require_env OCI_LOG_OBJECT_ID
 

@@ -1,3 +1,7 @@
+# Minimal example values for the Terraform deployment in this sample.
+# Replace the OCIDs, region, availability domain, and image URLs with values
+# from your tenancy before running `terraform plan`.
+
 tenancy_ocid       = "ocid1.tenancy.oc1..exampleuniqueID"
 compartment_id     = "ocid1.compartment.oc1..exampleuniqueID"
 region             = "us-ashburn-1"

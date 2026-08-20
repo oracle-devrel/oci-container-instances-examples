@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Build and publish the three sample images to an OCI-compatible registry.
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -36,6 +38,8 @@ build_and_push() {
   local context_dir="$2"
   local full_image_ref="${OCIR_REGISTRY}/${NAMESPACE}/${image_name}:${TAG}"
 
+  # Each image is built from its local sample directory so the script can be
+  # run from anywhere inside or outside the repository.
   log "building ${full_image_ref} from ${context_dir}"
   docker build -t "${full_image_ref}" "${REPO_ROOT}/${context_dir}"
 

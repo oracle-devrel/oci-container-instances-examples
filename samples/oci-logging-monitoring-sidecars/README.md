@@ -1,83 +1,17 @@
 # OCI Container Instance Logging And Metrics
 
-This repository contains sidecar forwarding patterns for **OCI Container Instances**:
+This sample shows how to run a generator container with optional sidecars that forward shared-file logs to OCI Logging and shared-file metrics to OCI Monitoring.
 
-- `generator/`: an HTTP service that creates and appends to a shared log file
-- `log_forwarder/`: an optional resource-principal-only log shipper that reads that file and sends lines to OCI Logging
-- `metrics_forwarder/`: a resource-principal-only metrics shipper that reads JSON-lines metric records from a shared file and sends them to OCI Monitoring
-- `container_instance/`: Terraform that provisions the OCI infrastructure and the container instance runtime
+## Get The Example Working
 
-If you want the architecture walkthrough first, read [architecture-walkthrough.md](/home/harpapat/Repos/oci_container_instance_examples/oci-logging-sidecar/blog/architecture-walkthrough.md).
+### 1. Build and push the images
 
-## Architecture
-
-The runtime model is:
-
-1. the generator creates `/mnt/logs/app.log`
-2. if enabled, the log forwarder waits for that file
-3. if enabled, the log forwarder tails the file and rotated successors
-4. if enabled, the log forwarder spools pending batches to disk
-5. if enabled, the log forwarder sends batches to OCI Logging with the OCI Go SDK
-
-When enabled, the log forwarder uses:
-
-- resource principal authentication only
-- optional rename/create log rotation
-- inode-aware file tracking
-- on-disk spool and checkpoint state
-
-The metrics forwarder uses the same general model, but ships custom metrics to OCI Monitoring instead of log lines to OCI Logging.
-
-## Repository Layout
-
-```text
-generator/          generator container image
-log_forwarder/      log forwarder container image
-metrics_forwarder/  metrics forwarder container image
-container_instance/ Terraform for OCI resources and runtime
-blog/               architecture notes
-```
-
-## Recommended Path
-
-The primary deployment path is Terraform in [container_instance/](/home/harpapat/Repos/oci_container_instance_examples/oci-logging-sidecar/container_instance).
-
-That Terraform creates:
-
-- a VCN, subnet, route table, security list, and internet gateway
-- an optional OCI log group and custom log for the log forwarder
-- a dynamic group and IAM policy for the container instance resource principal, including OCI Monitoring write access
-- the container instance running the generator and log forwarder, with an optional metrics forwarder sidecar
-
-Use [container_instance/README.md](/home/harpapat/Repos/oci_container_instance_examples/oci-logging-sidecar/container_instance/README.md) for the exact `terraform init`, `plan`, and `apply` steps.
-
-## Local Image Build
-
-Build the generator:
+From this directory:
 
 ```bash
 docker build -t oci-generator ./generator
-```
-
-Build the log forwarder:
-
-```bash
 docker build -t oci-log-forwarder ./log_forwarder
-```
-
-The image is built from a compiled Go binary plus a small Alpine runtime.
-
-Build the metrics forwarder:
-
-```bash
 docker build -t oci-metrics-forwarder ./metrics_forwarder
-```
-
-The image is built from a compiled Go binary plus a small Alpine runtime.
-
-Build and push all three images to OCIR:
-
-```bash
 ./scripts/push-ocir-images.sh <ocir-registry> <namespace> [tag]
 ```
 
@@ -87,176 +21,184 @@ Example:
 ./scripts/push-ocir-images.sh uk-london-1.ocir.io axwtwdagdjcl latest
 ```
 
-## Generator
+The target registry must already be reachable by OCI Container Instances, and `docker login` must already be done for OCIR.
 
-The generator exposes:
+### 2. Deploy the sample with Terraform
 
-- `GET /health`
-- `POST /log`
-- `POST /metric`
-- `POST /random/logs`
-- `POST /random/metrics`
-
-Example:
+The quickest path is the Terraform under `container_instance/`.
 
 ```bash
-docker run --rm \
-  -e LOG_FILE_PATH=/logs/app.log \
-  -e HTTP_PORT=8080 \
-  -e DEFAULT_LOG_LEVEL=INFO \
-  -p 8080:8080 \
-  -v "$PWD/logs:/logs" \
-  oci-generator
+cd container_instance
+cp terraform.tfvars.example terraform.tfvars
 ```
 
-Then:
+Set at least these variables in `terraform.tfvars`:
+
+- `tenancy_ocid`
+- `compartment_id`
+- `region`
+- `availability_domain`
+- `generator_image_url`
+
+Set these when you want the sidecars enabled:
+
+- `enable_log_forwarder = true`
+- `log_forwarder_image_url = "<your log forwarder image>"`
+- `enable_metrics_forwarder = true`
+- `metrics_forwarder_image_url = "<your metrics forwarder image>"`
+
+Then apply:
 
 ```bash
-curl -X POST http://localhost:8080/log \
+terraform init
+terraform plan -out tfplan
+terraform apply tfplan
+```
+
+The Terraform creates the network, IAM policy and dynamic group, optional OCI Logging resources, and the container instance runtime. See [`container_instance/README.md`](container_instance/README.md) for the full deployment inputs and outputs.
+
+### 3. Send test traffic
+
+After the container instance is up, send logs to the generator:
+
+```bash
+curl -X POST http://<generator-host>:8080/log \
   -H 'Content-Type: application/json' \
   -d '{"level":"INFO","message":"hello from generator"}'
 ```
 
-Send a test metric:
+Send metrics when the metrics sidecar is enabled:
 
 ```bash
-curl -X POST http://localhost:8080/metric \
+curl -X POST http://<generator-host>:8080/metric \
   -H 'Content-Type: application/json' \
   -d '{"name":"request_count","value":1,"dimensions":{"service":"generator"}}'
 ```
 
-Enable random log generation:
+Optional traffic generators:
 
 ```bash
-curl -X POST http://localhost:8080/random/logs \
+curl -X POST http://<generator-host>:8080/random/logs \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled":true}'
+
+curl -X POST http://<generator-host>:8080/random/metrics \
   -H 'Content-Type: application/json' \
   -d '{"enabled":true}'
 ```
 
-Enable random metric generation:
+### 4. Know the local-runtime limitation
 
-```bash
-curl -X POST http://localhost:8080/random/metrics \
-  -H 'Content-Type: application/json' \
-  -d '{"enabled":true}'
-```
+Both sidecars are resource-principal-only. Their OCI API calls are expected to work in OCI Container Instances, not on a plain local Docker host.
 
-## Log Forwarder
-
-The log forwarder is optional. When enabled, it requires:
-
-- `LOG_FILE_PATH`
-- `OCI_LOG_OBJECT_ID`
-- OCI resource principal credentials injected by the runtime
-
-Example container start:
+The generator can still be run locally for file-generation tests:
 
 ```bash
 docker run --rm \
   -e LOG_FILE_PATH=/logs/app.log \
-  -e OCI_LOG_OBJECT_ID=ocid1.log.oc1.iad.exampleuniqueID \
-  -e OCI_AUTH_TYPE=resource_principal \
-  -v "$PWD/logs:/logs" \
-  oci-log-forwarder
-```
-
-This is only expected to work in a runtime that injects OCI resource principal credentials. A plain local Docker host is not enough.
-
-## Log Forwarder Environment
-
-| Variable | Required | Default | Purpose |
-| --- | --- | --- | --- |
-| `LOG_FILE_PATH` | yes | none | File to tail and rotate |
-| `OCI_LOG_OBJECT_ID` | yes | none | Target OCI custom log OCID |
-| `OCI_AUTH_TYPE` | no | `resource_principal` | Compatibility guard; any other value is rejected |
-| `OCI_LOG_TYPE` | no | `app.log` | Log batch type sent to OCI Logging |
-| `READ_FROM_HEAD` | no | `true` | Read existing content on first startup |
-| `LOG_FORWARDER_LOG_LEVEL` | no | `INFO` | Log forwarder log level |
-| `LOG_FORWARDER_FLUSH_INTERVAL` | no | `5s` | Batch flush interval |
-| `LOG_FORWARDER_CHUNK_LIMIT_SIZE` | no | `1m` | Max batch payload before immediate send |
-| `LOG_FORWARDER_QUEUED_BATCH_LIMIT` | no | `64` | Max queued on-disk batches before reads pause |
-| `LOG_FORWARDER_DISK_USAGE_LOG_INTERVAL` | no | `5m` | How often the log forwarder logs total size of `app.log` plus rotated siblings |
-| `LOGROTATE_ENABLED` | no | `false` | Whether the entrypoint starts the internal logrotate loop |
-| `OCI_MAX_BATCH_ENTRIES` | no | `1000` | Max log lines per `PutLogs` request |
-| `OCI_MAX_ENTRY_SIZE_BYTES` | no | `900000` | Oversize lines are truncated to this limit |
-| `LOG_FORWARDER_STATE_DIR` | no | `/var/lib/oci-log-forwarder/state` | Checkpoint directory |
-| `LOG_FORWARDER_SPOOL_DIR` | no | `/var/lib/oci-log-forwarder/spool` | On-disk spool directory |
-| `LOG_QUEUE_DIR` | no | `${LOG_FORWARDER_SPOOL_DIR}` | Explicit spool path override |
-| `LOGROTATE_FREQUENCY` | no | `hourly` | Rotation cadence when `LOGROTATE_ENABLED=true` |
-| `LOGROTATE_SIZE` | no | `50M` | Rotate after this size when `LOGROTATE_ENABLED=true` |
-| `LOGROTATE_ROTATE_COUNT` | no | `24` | Number of rotated files to retain when `LOGROTATE_ENABLED=true` |
-| `LOGROTATE_INTERVAL_SECONDS` | no | `60` | How often logrotate runs when `LOGROTATE_ENABLED=true` |
-
-## Metrics Forwarder
-
-The metrics forwarder requires:
-
-- `METRIC_FILE_PATH`
-- `OCI_MONITORING_NAMESPACE`
-- `OCI_MONITORING_COMPARTMENT_ID`
-- OCI resource principal credentials injected by the runtime
-
-The metrics source file is newline-delimited JSON. Each line should be a JSON object with at least:
-
-- `name`
-- `value`
-
-The metrics forwarder also accepts optional fields such as `timestamp`, `dimensions`, `metadata`, `resource_group`, `namespace`, and `compartment_id`.
-
-Example metric line:
-
-```json
-{"name":"request_count","value":1,"dimensions":{"service":"generator","route":"/log"}}
-```
-
-Example container start:
-
-```bash
-docker run --rm \
   -e METRIC_FILE_PATH=/metrics/metrics.jsonl \
-  -e OCI_MONITORING_NAMESPACE=my_sidecar_metrics \
-  -e OCI_MONITORING_COMPARTMENT_ID=ocid1.compartment.oc1..exampleuniqueID \
-  -e OCI_AUTH_TYPE=resource_principal \
+  -e HTTP_PORT=8080 \
+  -p 8080:8080 \
+  -v "$PWD/logs:/logs" \
   -v "$PWD/metrics:/metrics" \
-  oci-metrics-forwarder
+  oci-generator
 ```
 
-This is only expected to work in a runtime that injects OCI resource principal credentials. A plain local Docker host is not enough.
-The forwarder posts metrics to the OCI telemetry ingestion endpoint, not the standard Monitoring query endpoint. By default it derives that ingestion endpoint from `OCI_REGION`, and you can override it with `OCI_MONITORING_INGESTION_ENDPOINT` if your environment needs an explicit value.
+## Environment Variables
 
-## Metrics Forwarder Environment
+### Logging Sidecar
 
-| Variable | Required | Default | Purpose |
-| --- | --- | --- | --- |
-| `METRIC_FILE_PATH` | yes | none | JSON-lines metric file to tail and rotate |
-| `OCI_REGION` | no | runtime-derived | Region used to resolve the OCI telemetry ingestion endpoint |
-| `OCI_MONITORING_NAMESPACE` | yes | none | Default OCI Monitoring namespace for emitted metrics |
-| `OCI_MONITORING_COMPARTMENT_ID` | yes | none | Default compartment OCID for emitted metrics |
-| `OCI_MONITORING_RESOURCE_GROUP` | no | none | Optional default OCI Monitoring resource group |
-| `OCI_MONITORING_INGESTION_ENDPOINT` | no | derived from `OCI_REGION` | Explicit OCI telemetry ingestion endpoint override |
-| `OCI_AUTH_TYPE` | no | `resource_principal` | Compatibility guard; any other value is rejected |
-| `READ_FROM_HEAD` | no | `true` | Read existing content on first startup |
-| `METRICS_FORWARDER_LOG_LEVEL` | no | `INFO` | Metrics forwarder log level |
-| `METRICS_FORWARDER_FLUSH_INTERVAL` | no | `5s` | Metric batch flush interval |
-| `METRICS_FORWARDER_CHUNK_LIMIT_SIZE` | no | `1m` | Max metric batch payload before immediate send |
-| `METRICS_FORWARDER_QUEUED_BATCH_LIMIT` | no | `64` | Max queued on-disk metric batches before reads pause |
-| `METRICS_FORWARDER_DISK_USAGE_LOG_INTERVAL` | no | `5m` | How often the metrics forwarder logs total size of the source metric files plus rotated siblings |
-| `METRICS_FORWARDER_STATE_DIR` | no | `/var/lib/oci-metrics-forwarder/state` | Checkpoint directory |
-| `METRICS_FORWARDER_SPOOL_DIR` | no | `/var/lib/oci-metrics-forwarder/spool` | On-disk spool directory |
-| `METRIC_QUEUE_DIR` | no | `${METRICS_FORWARDER_SPOOL_DIR}` | Explicit metric spool path override |
-| `METRIC_STATE_FILE` | no | `${METRICS_FORWARDER_STATE_DIR}/input.json` | Explicit metric tracker state path override |
-| `METRIC_POLL_INTERVAL_SECONDS` | no | `1` | How often to poll for new metric lines |
-| `OCI_MAX_BATCH_ENTRIES` | no | `50` | Max metric records per `post_metric_data` call |
-| `LOGROTATE_ENABLED` | no | `false` | Whether the entrypoint starts the internal metric-file logrotate loop |
-| `LOGROTATE_FREQUENCY` | no | `hourly` | Rotation cadence when `LOGROTATE_ENABLED=true` |
-| `LOGROTATE_SIZE` | no | `50M` | Rotate after this size when `LOGROTATE_ENABLED=true` |
-| `LOGROTATE_ROTATE_COUNT` | no | `24` | Number of rotated metric files to retain when `LOGROTATE_ENABLED=true` |
-| `LOGROTATE_INTERVAL_SECONDS` | no | `60` | How often logrotate runs when `LOGROTATE_ENABLED=true` |
+| Variable | Required | Group | Default | Purpose |
+| --- | --- | --- | --- | --- |
+| `LOG_FILE_PATH` | yes | Required | none | Shared log file that the forwarder tails. |
+| `OCI_LOG_OBJECT_ID` | yes | Required | none | OCI custom log OCID that receives forwarded entries. |
+| `OCI_AUTH_TYPE` | no | OCI auth and target | `resource_principal` | Compatibility guard; any other value is rejected. |
+| `OCI_LOG_TYPE` | no | OCI auth and target | `app.log` | Log batch type sent to OCI Logging. |
+| `READ_FROM_HEAD` | no | Read behavior | `true` | Reads existing file content on first startup. |
+| `LOG_FORWARDER_LOG_LEVEL` | no | Read behavior | `INFO` | Forwarder container log level. |
+| `LOG_FORWARDER_FLUSH_INTERVAL` | no | Batching and backpressure | `5s` | Maximum delay before the next queued batch is sent. |
+| `LOG_FORWARDER_CHUNK_LIMIT_SIZE` | no | Batching and backpressure | `1m` | Maximum batch payload before the reader flushes immediately. |
+| `LOG_FORWARDER_QUEUED_BATCH_LIMIT` | no | Batching and backpressure | `64` | Maximum number of pending spool files before reads pause. |
+| `OCI_MAX_BATCH_ENTRIES` | no | Batching and backpressure | `1000` | Maximum log lines per OCI Logging request. |
+| `OCI_MAX_ENTRY_SIZE_BYTES` | no | Batching and backpressure | `900000` | Maximum size of a single line before truncation. |
+| `LOG_FORWARDER_STATE_DIR` | no | Local state and spool | `/var/lib/oci-log-forwarder/state` | Directory used for checkpoint state. |
+| `LOG_FORWARDER_SPOOL_DIR` | no | Local state and spool | `/var/lib/oci-log-forwarder/spool` | Directory used for on-disk pending batches. |
+| `LOG_QUEUE_DIR` | no | Local state and spool | `${LOG_FORWARDER_SPOOL_DIR}` | Explicit spool-path override. |
+| `LOG_FORWARDER_DISK_USAGE_LOG_INTERVAL` | no | Local state and spool | `5m` | How often the container logs total size of the source file plus rotated siblings. |
+| `LOGROTATE_ENABLED` | no | Rotation | `false` | Starts the internal logrotate loop when enabled. |
+| `LOGROTATE_FREQUENCY` | no | Rotation | `hourly` | Logrotate cadence keyword. |
+| `LOGROTATE_SIZE` | no | Rotation | `50M` | Rotates after the file reaches this size. |
+| `LOGROTATE_ROTATE_COUNT` | no | Rotation | `24` | Number of rotated files to keep. |
+| `LOGROTATE_INTERVAL_SECONDS` | no | Rotation | `60` | How often the entrypoint invokes logrotate. |
 
-## Current Contract
+### Monitoring Sidecar
 
-- The generator creates the shared log file.
-- When enabled, the log forwarder waits for that file indefinitely.
-- The log forwarder never creates the shared log file itself.
-- When enabled, the log forwarder sends raw lines as-is; it does not parse structured logs before ingestion.
-- The metrics forwarder reads newline-delimited JSON metric records from a shared file and forwards them to OCI Monitoring.
+| Variable | Required | Group | Default | Purpose |
+| --- | --- | --- | --- | --- |
+| `METRIC_FILE_PATH` | yes | Required | none | Shared JSON-lines metric file that the forwarder tails. |
+| `OCI_MONITORING_NAMESPACE` | yes | Required | none | Default OCI Monitoring namespace for emitted metrics. |
+| `OCI_MONITORING_COMPARTMENT_ID` | yes | Required | none | Default target compartment OCID for emitted metrics. |
+| `OCI_REGION` | no | OCI auth and target | runtime-derived | Region used to derive the telemetry ingestion endpoint. |
+| `OCI_MONITORING_RESOURCE_GROUP` | no | OCI auth and target | none | Optional default resource group. |
+| `OCI_MONITORING_INGESTION_ENDPOINT` | no | OCI auth and target | derived from `OCI_REGION` | Explicit telemetry ingestion endpoint override. |
+| `OCI_AUTH_TYPE` | no | OCI auth and target | `resource_principal` | Compatibility guard; any other value is rejected. |
+| `READ_FROM_HEAD` | no | Read behavior | `true` | Reads existing file content on first startup. |
+| `METRICS_FORWARDER_LOG_LEVEL` | no | Read behavior | `INFO` | Forwarder container log level. |
+| `METRICS_FORWARDER_FLUSH_INTERVAL` | no | Batching and backpressure | `5s` | Maximum delay before the next queued metric batch is sent. |
+| `METRICS_FORWARDER_CHUNK_LIMIT_SIZE` | no | Batching and backpressure | `1m` | Maximum batch payload before the reader flushes immediately. |
+| `METRICS_FORWARDER_QUEUED_BATCH_LIMIT` | no | Batching and backpressure | `64` | Maximum number of pending spool files before reads pause. |
+| `METRIC_POLL_INTERVAL_SECONDS` | no | Batching and backpressure | `1` | Poll interval for new metric lines. |
+| `OCI_MAX_BATCH_ENTRIES` | no | Batching and backpressure | `50` | Maximum metric records per OCI Monitoring request. |
+| `METRICS_FORWARDER_STATE_DIR` | no | Local state and spool | `/var/lib/oci-metrics-forwarder/state` | Directory used for checkpoint state. |
+| `METRICS_FORWARDER_SPOOL_DIR` | no | Local state and spool | `/var/lib/oci-metrics-forwarder/spool` | Directory used for on-disk pending batches. |
+| `METRIC_QUEUE_DIR` | no | Local state and spool | `${METRICS_FORWARDER_SPOOL_DIR}` | Explicit spool-path override. |
+| `METRIC_STATE_FILE` | no | Local state and spool | `${METRICS_FORWARDER_STATE_DIR}/input.json` | Explicit checkpoint file override. |
+| `METRICS_FORWARDER_DISK_USAGE_LOG_INTERVAL` | no | Local state and spool | `5m` | How often the container logs total size of the source file plus rotated siblings. |
+| `LOGROTATE_ENABLED` | no | Rotation | `false` | Starts the internal logrotate loop when enabled. |
+| `LOGROTATE_FREQUENCY` | no | Rotation | `hourly` | Logrotate cadence keyword. |
+| `LOGROTATE_SIZE` | no | Rotation | `50M` | Rotates after the file reaches this size. |
+| `LOGROTATE_ROTATE_COUNT` | no | Rotation | `24` | Number of rotated files to keep. |
+| `LOGROTATE_INTERVAL_SECONDS` | no | Rotation | `60` | How often the entrypoint invokes logrotate. |
+
+## Overall Architecture
+
+The sample has four parts:
+
+- `generator/`: HTTP service that writes application logs and JSON-line metrics into shared files.
+- `log_forwarder/`: optional sidecar that tails the shared log file, spools batches to disk, and sends them to OCI Logging.
+- `metrics_forwarder/`: optional sidecar that tails the shared metric file, validates metric records, spools batches to disk, and sends them to OCI Monitoring.
+- `container_instance/`: Terraform that provisions the network, IAM, optional OCI Logging resources, and the OCI Container Instance runtime.
+
+Runtime flow:
+
+1. The generator writes `/mnt/logs/app.log` and `/mnt/metrics/metrics.jsonl`.
+2. The sidecars mount the same shared volumes and track offsets by inode, so rename-based rotations can still be drained correctly.
+3. Each sidecar persists checkpoints under its state directory and writes pending batches into its spool directory before attempting OCI API calls.
+4. The log sidecar pushes to OCI Logging by using the injected resource principal and the custom log OCID.
+5. The metrics sidecar pushes to the OCI telemetry ingestion endpoint by using the injected resource principal plus namespace and compartment defaults.
+
+## Rotation Behavior
+
+### Log rotation
+
+- The log forwarder entrypoint can run an internal `logrotate` loop when `LOGROTATE_ENABLED=true`.
+- It uses rename-and-create rotation with `dateext`, so the active file name stays stable while rotated siblings are preserved.
+- The forwarder tracks files by inode and offset, which lets it continue draining renamed files after rotation.
+- Pending log batches are written to the spool directory before they are sent to OCI Logging, so transient OCI failures do not lose already-read lines.
+
+### Metric rotation
+
+- The metrics forwarder entrypoint can also run an internal `logrotate` loop when `LOGROTATE_ENABLED=true`.
+- Its generated logrotate config uses `copytruncate`, which keeps the metric producer writing to the same file path while the rotated copy is archived.
+- The forwarder still tracks inode and offsets, persists checkpoints, and drains queued metric batches from disk before exit.
+- Metrics are validated when read from the shared file; invalid JSON lines are dropped with warnings instead of blocking the pipeline.
+
+## Repository Layout
+
+```text
+generator/          generator container image
+log_forwarder/      OCI Logging sidecar image
+metrics_forwarder/  OCI Monitoring sidecar image
+container_instance/ Terraform deployment
+scripts/            helper scripts for image publishing
+```

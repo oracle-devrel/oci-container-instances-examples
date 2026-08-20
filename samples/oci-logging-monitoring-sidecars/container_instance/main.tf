@@ -2,6 +2,8 @@ provider "oci" {
   region = var.region
 }
 
+# Keep enablement logic in locals so container blocks and OCI resources stay in
+# sync when either sidecar image is omitted.
 locals {
   log_forwarder_enabled     = var.enable_log_forwarder && trimspace(var.log_forwarder_image_url) != ""
   name_prefix               = replace(var.display_name, "_", "-")
@@ -100,6 +102,8 @@ resource "oci_identity_dynamic_group" "log_forwarder_runtime" {
   freeform_tags  = var.freeform_tags
 }
 
+# The policy grants image pull access for OCIR plus optional write access to OCI
+# Logging and OCI Monitoring from the container instance resource principal.
 resource "oci_identity_policy" "log_forwarder_runtime" {
   compartment_id = var.tenancy_ocid
   name           = var.policy_name
@@ -147,6 +151,8 @@ resource "oci_container_instances_container_instance" "logging_test" {
     display_name = "oci-generator"
     image_url    = var.generator_image_url
 
+    # The generator writes both logs and metrics into shared EMPTYDIR volumes
+    # that the optional sidecars consume.
     environment_variables = {
       LOG_FILE_PATH     = var.log_file_path
       METRIC_FILE_PATH  = var.metric_file_path
@@ -172,6 +178,8 @@ resource "oci_container_instances_container_instance" "logging_test" {
       image_url                      = var.log_forwarder_image_url
       is_resource_principal_disabled = false
 
+      # The log forwarder reads the shared log file and keeps its checkpoint and
+      # spool data on a separate EMPTYDIR volume.
       environment_variables = {
         LOG_FILE_PATH                         = var.log_file_path
         OCI_LOG_OBJECT_ID                     = oci_logging_log.log_forwarder[0].id
@@ -209,6 +217,8 @@ resource "oci_container_instances_container_instance" "logging_test" {
       image_url                      = var.metrics_forwarder_image_url
       is_resource_principal_disabled = false
 
+      # The metrics forwarder reads the shared metric file and keeps its
+      # checkpoint and spool data on a separate EMPTYDIR volume.
       environment_variables = {
         METRIC_FILE_PATH                          = var.metric_file_path
         OCI_REGION                                = var.region
@@ -255,6 +265,8 @@ resource "oci_container_instances_container_instance" "logging_test" {
     volume_type = "EMPTYDIR"
   }
 
+  # Sidecar state uses dedicated EMPTYDIR volumes so spool and checkpoint data
+  # remain isolated from the shared producer files.
   volumes {
     name        = "log-forwarder-status"
     volume_type = "EMPTYDIR"

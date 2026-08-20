@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""HTTP generator for the sidecar sample.
+
+This container writes application logs and JSON-line metrics into shared files
+that can be consumed by the log and metrics forwarder sidecars.
+"""
+
 from __future__ import annotations
 
 import json
@@ -12,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
+# Runtime configuration for the shared-file producer.
 LOG_FILE_PATH = Path(os.environ.get("LOG_FILE_PATH", "/logs/app.log"))
 METRIC_FILE_PATH = Path(os.environ.get("METRIC_FILE_PATH", "/metrics/metrics.jsonl"))
 HOST = os.environ.get("HTTP_HOST", "0.0.0.0")
@@ -49,6 +56,7 @@ def parse_enabled_flag(value: object) -> bool:
 
 
 def ensure_output_files() -> None:
+    """Create the shared output files before the HTTP server starts."""
     LOG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
     LOG_FILE_PATH.touch(exist_ok=True)
     METRIC_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -56,6 +64,7 @@ def ensure_output_files() -> None:
 
 
 def append_log(level: str, message: str) -> str:
+    """Append a single formatted application log line."""
     line = LOG_FORMAT.format(timestamp=utc_timestamp(), level=level, message=message)
     with LOG_WRITE_LOCK:
         with LOG_FILE_PATH.open("a", encoding="utf-8") as handle:
@@ -64,6 +73,7 @@ def append_log(level: str, message: str) -> str:
 
 
 def append_metric(metric: dict) -> dict:
+    """Append one metric record as a compact JSON line."""
     payload = {key: value for key, value in dict(metric).items() if value is not None}
     payload.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
     payload.setdefault("namespace", DEFAULT_METRIC_NAMESPACE)
@@ -77,6 +87,7 @@ def append_metric(metric: dict) -> dict:
 
 
 def random_log_loop() -> None:
+    """Emit sample logs at a fixed cadence when the toggle is enabled."""
     while True:
         with STATE_LOCK:
             enabled = RANDOM_LOGS_ENABLED
@@ -89,6 +100,7 @@ def random_log_loop() -> None:
 
 
 def random_metric_loop() -> None:
+    """Emit sample metrics at a fixed cadence when the toggle is enabled."""
     while True:
         with STATE_LOCK:
             enabled = RANDOM_METRICS_ENABLED
@@ -108,6 +120,7 @@ def random_metric_loop() -> None:
 
 
 class LogRequestHandler(BaseHTTPRequestHandler):
+    """Expose write and toggle endpoints for the sample generator."""
     server_version = "oci-generator/1.1"
 
     def _send_json(self, status: int, payload: dict) -> None:

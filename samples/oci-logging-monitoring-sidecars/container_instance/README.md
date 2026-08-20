@@ -9,8 +9,6 @@ It provisions:
 - IAM resources for resource principal access to OCI Logging and OCI Monitoring
 - the container instance running the generator container, with optional log forwarder and metrics forwarder sidecars
 
-For the architecture overview, see [architecture-walkthrough.md](/home/harpapat/Repos/oci_container_instance_examples/oci-logging-sidecar/blog/architecture-walkthrough.md).
-
 ## What Gets Created
 
 Terraform creates:
@@ -90,7 +88,7 @@ export TF_VAR_region='us-ashburn-1'
 ## Apply
 
 ```bash
-cd /home/harpapat/Repos/oci_container_instance_examples/oci-logging-sidecar/container_instance
+cd samples/oci-logging-monitoring-sidecars/container_instance
 terraform init
 terraform plan -out tfplan
 terraform apply tfplan

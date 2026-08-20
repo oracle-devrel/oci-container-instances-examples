@@ -1,3 +1,5 @@
+# Terraform and provider version constraints for this sample deployment.
+
 terraform {
   required_version = ">= 1.5.0"
 

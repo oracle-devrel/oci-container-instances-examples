@@ -1,5 +1,6 @@
 FROM golang:1.24-alpine AS builder
 
+# Build a static binary so the runtime image stays small and simple.
 WORKDIR /src
 
 COPY go.mod go.mod
@@ -11,6 +12,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o
 
 FROM alpine:3.21
 
+# Runtime defaults keep spool, state, and logrotate metadata on writable paths.
 ENV LOG_FORWARDER_SPOOL_DIR=/var/lib/oci-log-forwarder/spool \
     LOG_FORWARDER_STATE_DIR=/var/lib/oci-log-forwarder/state \
     LOGROTATE_STATE_FILE=/var/lib/logrotate/logrotate.status \
@@ -34,6 +36,7 @@ COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh /opt/oci-log-forwarder/oci-log-forwarder
 
+# The container shares the source log volume plus persistent forwarder state.
 VOLUME ["/logs", "/var/lib/oci-log-forwarder"]
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
